@@ -139,6 +139,7 @@ def search_in_csv(keyword: str) -> list[str]:
     return results or ["❌ Ничего не найдено."]
 
 # --- Запуск ---
+# --- Запуск ---
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
@@ -154,10 +155,6 @@ def main():
 
     logger.info("✅ OSINT-бот запущен")
     app.run_polling()
-
-if __name__ == "__main__":
-    main()
-
 
 if __name__ == "__main__":
     main()
