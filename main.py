@@ -1,21 +1,15 @@
 import logging
 import os
-import csv
+import sqlite3
 import socket
 import dns.resolver
 import aiohttp
 import phonenumbers
-import sqlite3
-import asyncio
-
 from phonenumbers import geocoder, carrier
 from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    ContextTypes, filters
 )
 
 # --- Переменные окружения ---
