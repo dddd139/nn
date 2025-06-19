@@ -1,15 +1,21 @@
 import logging
 import os
-import sqlite3
+import csv
 import socket
 import dns.resolver
 import aiohttp
 import phonenumbers
+import sqlite3
+import asyncio
+import httpx
 from phonenumbers import geocoder, carrier
 from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    ContextTypes, filters
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
 )
 
 # --- Переменные окружения ---
@@ -17,7 +23,6 @@ TOKEN = os.getenv("TOKEN", "")
 IPINFO_TOKEN = os.getenv("IPINFO_TOKEN", "")
 HUNTER_API_KEY = os.getenv("HUNTER_API_KEY", "")
 DB_PATH = "data.db"
-GDRIVE_FILE_ID = "1uSMpNJRQJqVziNmVANI7oBG8IyrZguCa"
 
 if not TOKEN:
     raise RuntimeError("❌ Укажите переменную окружения TOKEN")
@@ -26,22 +31,17 @@ if not TOKEN:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Загрузка базы с Google Drive ---
-async def download_database():
-    if os.path.exists(DB_PATH):
-        logger.info("📦 База уже загружена.")
-        return
-    url = f"https://drive.google.com/uc?export=download&id={GDRIVE_FILE_ID}"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                raise RuntimeError(f"❌ Ошибка скачивания: {resp.status}")
-            with open(DB_PATH, "wb") as f:
-                f.write(await resp.read())
-    logger.info("✅ data.db загружена с Google Drive")
-
 # --- Состояния пользователей ---
 user_states: dict[int, str] = {}
+
+# --- Функция скачивания базы ---
+def download_database():
+    file_id = "1uSMpNJRQJqVziNmVANI7oBG8IyrZguCa"
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    r = httpx.get(url)
+    with open("data.db", "wb") as f:
+        f.write(r.content)
+    logger.info("✅ data.db загружена с Google Drive")
 
 # --- Команды ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -52,7 +52,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/domain — информация о домене\n"
         "/email — проверка email через Hunter.io\n"
         "/telegram — проверить Telegram username\n"
-        "/searchdb — быстрый поиск по базе SQLite"
+        "/searchdb — поиск по SQLite-базе"
     )
 
 async def cmd_generic(update: Update, context: ContextTypes.DEFAULT_TYPE, state: str, prompt: str):
@@ -76,13 +76,12 @@ async def cmd_telegram(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_searchdb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_states[update.effective_user.id] = "awaiting_dbsearch"
-    await update.message.reply_text("🔎 Введите ключевое слово для поиска в базе данных:")
+    await update.message.reply_text("🔎 Введите запрос для поиска в базе:")
 
-# --- FTS SQLite поиск ---
+# --- Поиск в SQLite ---
 def search_in_fts(keyword: str) -> list[str]:
     if not os.path.exists(DB_PATH):
-        return ["❌ База данных не найдена"]
-
+        return ["❌ База не найдена"]
     results = []
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -93,59 +92,43 @@ def search_in_fts(keyword: str) -> list[str]:
         LIMIT 10;
         """
         cursor.execute(query, (f'"{keyword}"',))
-        rows = cursor.fetchall()
-        for row in rows:
+        for row in cursor.fetchall():
             results.append(" | ".join(str(x) for x in row))
         conn.close()
     except Exception as e:
-        results.append(f"❌ Ошибка SQLite: {e}")
-
-    return results or ["❌ Ничего не найдено"]
+        results.append(f"❌ SQLite error: {e}")
+    return results or ["❌ Нет результатов"]
 
 # --- Обработка сообщений ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = user_states.pop(update.effective_user.id, "")
     text = update.message.text.strip()
-
     try:
         if state == "awaiting_phone":
             num = phonenumbers.parse(text, None)
-            country = geocoder.description_for_number(num, "en")
-            operator = carrier.name_for_number(num, "en")
-            await update.message.reply_text(f"📞 Страна: {country}\n📡 Оператор: {operator}")
-
+            await update.message.reply_text(f"📞 Страна: {geocoder.description_for_number(num, 'en')}\n📡 Оператор: {carrier.name_for_number(num, 'en')}")
         elif state == "awaiting_ip":
-            url = f"https://ipinfo.io/{text}?token={IPINFO_TOKEN}"
-            async with aiohttp.ClientSession() as sess:
-                async with sess.get(url) as resp:
-                    data = await resp.json()
+            async with aiohttp.ClientSession() as s:
+                async with s.get(f"https://ipinfo.io/{text}?token={IPINFO_TOKEN}") as r:
+                    data = await r.json()
             await update.message.reply_text("\n".join(f"{k}: {v}" for k, v in data.items()))
-
         elif state == "awaiting_domain":
             ip = socket.gethostbyname(text)
-            answers = dns.resolver.resolve(text, 'NS')
-            ns = ", ".join(str(r.target) for r in answers)
-            await update.message.reply_text(f"🌐 {text} → IP: {ip}\nNS: {ns}")
-
+            ns = dns.resolver.resolve(text, 'NS')
+            await update.message.reply_text(f"🌐 {text} → IP: {ip}\nNS: {', '.join(str(r.target) for r in ns)}")
         elif state == "awaiting_email":
-            url = f"https://api.hunter.io/v2/email-verifier?email={text}&api_key={HUNTER_API_KEY}"
-            async with aiohttp.ClientSession() as sess:
-                async with sess.get(url) as resp:
-                    data = await resp.json()
+            async with aiohttp.ClientSession() as s:
+                async with s.get(f"https://api.hunter.io/v2/email-verifier?email={text}&api_key={HUNTER_API_KEY}") as r:
+                    data = await r.json()
             result = data.get("data", {})
             await update.message.reply_text("\n".join(f"{k}: {v}" for k, v in result.items()))
-
         elif state == "awaiting_telegram":
-            user = text.lstrip("@")
-            await update.message.reply_text(f"https://t.me/{user}")
-
+            await update.message.reply_text(f"https://t.me/{text.lstrip('@')}")
         elif state == "awaiting_dbsearch":
-            results = search_in_fts(text)
-            for r in results:
+            for r in search_in_fts(text):
                 await update.message.reply_text(r)
-
         else:
-            await update.message.reply_text("🤖 Используй команды: /start")
+            await update.message.reply_text("🤖 Используй команду /start")
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
 
@@ -153,7 +136,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     app = ApplicationBuilder().token(TOKEN).build()
     await app.bot.delete_webhook(drop_pending_updates=True)
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("phone", cmd_phone))
     app.add_handler(CommandHandler("ip", cmd_ip))
@@ -162,25 +144,17 @@ async def main():
     app.add_handler(CommandHandler("telegram", cmd_telegram))
     app.add_handler(CommandHandler("searchdb", cmd_searchdb))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
     logger.info("✅ OSINT-бот запущен")
     await app.run_polling()
 
-# --- Запуск с безопасным Event Loop ---
 if __name__ == "__main__":
-    import asyncio
-
     async def runner():
-        await download_database()
+        download_database()
         await main()
 
     try:
         loop = asyncio.get_event_loop()
-        loop.run_until_complete(runner())
-    except RuntimeError as e:
-        if "already running" in str(e):
-            asyncio.create_task(runner())
-        else:
-            raise
-
-
+        loop.create_task(runner())
+        loop.run_forever()
+    except RuntimeError:
+        asyncio.run(runner())
