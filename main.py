@@ -182,13 +182,18 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
+    async def runner():
+        await download_database()  # автоматическая загрузка базы с Google Drive
+        await main()               # запуск Telegram-бота
+
     try:
-        asyncio.run(main())
+        asyncio.run(runner())
     except RuntimeError as e:
-        if "event loop is already running" in str(e):
+        if "event loop is running" in str(e):
             loop = asyncio.get_event_loop()
-            loop.create_task(main())
+            loop.create_task(runner())
             loop.run_forever()
         else:
             raise
+
 
