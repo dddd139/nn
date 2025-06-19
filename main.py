@@ -8,8 +8,12 @@ import phonenumbers
 from phonenumbers import geocoder, carrier
 
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    ContextTypes, filters
+)
 
+# --- Переменные окружения ---
 TOKEN = os.getenv("TOKEN", "")
 IPINFO_TOKEN = os.getenv("IPINFO_TOKEN", "")
 HUNTER_API_KEY = os.getenv("HUNTER_API_KEY", "")
@@ -19,11 +23,14 @@ CSV_FOLDER = "csv_data"
 if not TOKEN:
     raise RuntimeError("❌ Укажите переменную окружения TOKEN")
 
+# --- Логирование ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# --- Состояния пользователей ---
 user_states: dict[int, str] = {}
 
+# --- Команды ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Привет! Я OSINT-бот. Вот что я умею:\n\n"
@@ -31,7 +38,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/ip — информация об IP\n"
         "/domain — информация о домене\n"
         "/email — проверка email через Hunter.io\n"
-        "/telegram — проверить публичность Telegram\n"
+        "/telegram — проверить Telegram username\n"
         "/searchcsv — поиск по CSV\n"
         "/listcsv — список CSV-файлов"
     )
@@ -44,7 +51,7 @@ async def cmd_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await cmd_generic(update, context, "awaiting_phone", "📞 Введите номер телефона:")
 
 async def cmd_ip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await cmd_generic(update, context, "awaiting_ip", "🌍 Введите IP:")
+    await cmd_generic(update, context, "awaiting_ip", "🌍 Введите IP-адрес:")
 
 async def cmd_domain(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await cmd_generic(update, context, "awaiting_domain", "🌐 Введите домен:")
@@ -66,6 +73,7 @@ async def cmd_listcsv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = "❌ Папка csv_data не найдена."
     await update.message.reply_text(msg)
 
+# --- Обработка сообщений ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = user_states.pop(update.effective_user.id, "")
     text = update.message.text.strip()
@@ -80,8 +88,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif state == "awaiting_ip":
             url = f"https://ipinfo.io/{text}?token={IPINFO_TOKEN}"
             async with aiohttp.ClientSession() as sess:
-                resp = await sess.get(url)
-                data = await resp.json()
+                async with sess.get(url) as resp:
+                    data = await resp.json()
             await update.message.reply_text("\n".join(f"{k}: {v}" for k, v in data.items()))
 
         elif state == "awaiting_domain":
@@ -93,8 +101,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif state == "awaiting_email":
             url = f"https://api.hunter.io/v2/email-verifier?email={text}&api_key={HUNTER_API_KEY}"
             async with aiohttp.ClientSession() as sess:
-                resp = await sess.get(url)
-                data = await resp.json()
+                async with sess.get(url) as resp:
+                    data = await resp.json()
             result = data.get("data", {})
             await update.message.reply_text("\n".join(f"{k}: {v}" for k, v in result.items()))
 
@@ -107,29 +115,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for r in results:
                 await update.message.reply_text(r)
         else:
-            await update.message.reply_text("🤖 Используй команды: /phone, /ip, ...")
+            await update.message.reply_text("🤖 Используй команды: /start")
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
 
+# --- Поиск в CSV ---
 def search_in_csv(keyword: str) -> list[str]:
     results = []
     if not os.path.exists(CSV_FOLDER):
-        return ["❌ Папки csv_data нет"]
+        return ["❌ Папка csv_data не найдена."]
     for file in os.listdir(CSV_FOLDER):
-        if not file.endswith(".csv"):
-            continue
-        path = os.path.join(CSV_FOLDER, file)
-        try:
-            with open(path, encoding="utf-8", errors="ignore") as fi:
-                for r in csv.reader(fi):
-                    if any(keyword.lower() in str(c).lower() for c in r):
-                        results.append(f"[{file}] {' | '.join(r)}")
-                        if len(results) >= 20:
-                            return results
-        except:
-            results.append(f"[{file}] Ошибка чтения")
-    return results or ["❌ Ничего не найдено"]
+        if file.endswith(".csv"):
+            path = os.path.join(CSV_FOLDER, file)
+            try:
+                with open(path, encoding="utf-8", errors="ignore") as f:
+                    for row in csv.reader(f):
+                        if any(keyword.lower() in str(cell).lower() for cell in row):
+                            results.append(f"[{file}] {' | '.join(row)}")
+                            if len(results) >= 20:
+                                return results
+            except:
+                results.append(f"[{file}] ❌ Ошибка чтения файла.")
+    return results or ["❌ Ничего не найдено."]
 
+# --- Запуск ---
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
@@ -145,6 +154,10 @@ def main():
 
     logger.info("✅ OSINT-бот запущен")
     app.run_polling()
+
+if __name__ == "__main__":
+    main()
+
 
 if __name__ == "__main__":
     main()
