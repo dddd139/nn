@@ -141,8 +141,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Ошибка: {e}")
 
 # --- Запуск ---
-def main():
+# --- Запуск ---
+async def main():
     app = ApplicationBuilder().token(TOKEN).build()
+
+    await app.bot.delete_webhook(drop_pending_updates=True)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("phone", cmd_phone))
@@ -154,7 +157,8 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("✅ OSINT-бот запущен")
-    app.run_polling()
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
