@@ -9,9 +9,13 @@ from phonenumbers import geocoder, carrier
 
 from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    ContextTypes, filters
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
 )
+
 
 # --- Переменные окружения ---
 TOKEN = os.getenv("TOKEN", "")
