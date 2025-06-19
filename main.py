@@ -183,7 +183,6 @@ async def main():
 
 if __name__ == "__main__":
     async def runner():
-        await download_database()  # автоматическая загрузка базы с Google Drive
         await main()               # запуск Telegram-бота
 
     try:
