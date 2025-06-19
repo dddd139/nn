@@ -141,14 +141,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Ошибка: {e}")
 
 # --- Запуск ---
-# --- Запуск ---
-async def main():
+def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # 🧹 Удаляем возможный Webhook
-    await app.bot.delete_webhook(drop_pending_updates=True)
-
-    # 🔌 Регистрируем обработчики
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("phone", cmd_phone))
     app.add_handler(CommandHandler("ip", cmd_ip))
@@ -159,19 +154,7 @@ async def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("✅ OSINT-бот запущен")
-    await app.run_polling()
-
+    app.run_polling()
 
 if __name__ == "__main__":
-    import asyncio
-
-    try:
-        asyncio.run(main())
-    except RuntimeError as e:
-        # 🔄 Если event loop уже работает (например, на Render) — используем его
-        if "event loop is running" in str(e):
-            loop = asyncio.get_event_loop()
-            loop.create_task(main())
-            loop.run_forever()
-        else:
-            raise
+    main()
