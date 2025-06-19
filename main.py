@@ -78,25 +78,25 @@ async def cmd_searchdb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_states[update.effective_user.id] = "awaiting_dbsearch"
     await update.message.reply_text("🔎 Введите запрос для поиска в базе:")
 
-# --- Поиск в SQLite ---
-def search_in_fts(keyword: str) -> list[str]:
+# --- Быстрый SQL-поиск с использованием индексов (без FTS) ---
+async def fast_sqlite_search(query: str) -> list[str]:
     if not os.path.exists(DB_PATH):
         return ["❌ База не найдена"]
     results = []
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        query = """
-        SELECT phone, email, name FROM users_fts
-        WHERE users_fts MATCH ?
-        LIMIT 10;
-        """
-        cursor.execute(query, (f'"{keyword}"',))
-        for row in cursor.fetchall():
-            results.append(" | ".join(str(x) for x in row))
+        cursor.execute("""
+            SELECT phone, email, name FROM users
+            WHERE phone LIKE ? OR email LIKE ? OR name LIKE ?
+            LIMIT 10
+        """, (f"{query}%", f"{query}%", f"{query}%"))
+        rows = cursor.fetchall()
+        for phone, email, name in rows:
+            results.append(f"📞 {phone} | 📧 {email} | 👤 {name}")
         conn.close()
     except Exception as e:
-        results.append(f"❌ SQLite error: {e}")
+        results.append(f"❌ Ошибка при поиске: {e}")
     return results or ["❌ Нет результатов"]
 
 # --- Обработка сообщений ---
@@ -125,7 +125,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif state == "awaiting_telegram":
             await update.message.reply_text(f"https://t.me/{text.lstrip('@')}")
         elif state == "awaiting_dbsearch":
-            for r in search_in_fts(text):
+            for r in await fast_sqlite_search(text):
                 await update.message.reply_text(r)
         else:
             await update.message.reply_text("🤖 Используй команду /start")
@@ -148,7 +148,5 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
-    import nest_asyncio
     download_database()
-    nest_asyncio.apply()
-    asyncio.get_event_loop().run_until_complete(main())
+    asyncio.run(main())
