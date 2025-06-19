@@ -35,14 +35,13 @@ user_states: dict[int, str] = {}
 # --- Команды ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Привет! Я OSINT-бот. Вот что я умею:\n\n"
+          "👋 Привет! Я OSINT-бот. Вот что я умею:\n\n"
         "/phone — информация о номере телефона\n"
         "/ip — информация об IP\n"
         "/domain — информация о домене\n"
         "/email — проверка email через Hunter.io\n"
-        "/telegram — проверить публичность Telegram\n"
-        "/searchcsv — поиск по CSV\n"
-        "/listcsv — список CSV-файлов"
+        "/telegram — проверить Telegram username\n"
+        "/searchdb — быстрый поиск по SQLite базе"
     )
 
 async def cmd_generic(update: Update, context: ContextTypes.DEFAULT_TYPE, state: str, prompt: str):
