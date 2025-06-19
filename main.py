@@ -149,16 +149,4 @@ async def main():
 
 if __name__ == "__main__":
     download_database()
-
-    try:
-        import uvloop
-        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-    except ImportError:
-        pass
-
-    async def runner():
-        await main()
-
-    asyncio.get_event_loop().create_task(runner())
-    asyncio.get_event_loop().run_forever()
-
+    asyncio.run(main())
