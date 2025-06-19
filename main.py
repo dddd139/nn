@@ -148,13 +148,5 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
-    async def runner():
-        download_database()
-        await main()
-
-    try:
-        loop = asyncio.get_event_loop()
-        loop.create_task(runner())
-        loop.run_forever()
-    except RuntimeError:
-        asyncio.run(runner())
+    download_database()
+    asyncio.run(main())
