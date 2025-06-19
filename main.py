@@ -1,5 +1,6 @@
 import logging
 import os
+import csv
 import socket
 import dns.resolver
 import aiohttp
@@ -105,10 +106,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if state == "awaiting_phone":
             num = phonenumbers.parse(text, None)
-            await update.message.reply_text(
-                f"📞 Страна: {geocoder.description_for_number(num, 'en')}\n"
-                f"📡 Оператор: {carrier.name_for_number(num, 'en')}"
-            )
+            await update.message.reply_text(f"📞 Страна: {geocoder.description_for_number(num, 'en')}\n📡 Оператор: {carrier.name_for_number(num, 'en')}")
         elif state == "awaiting_ip":
             async with aiohttp.ClientSession() as s:
                 async with s.get(f"https://ipinfo.io/{text}?token={IPINFO_TOKEN}") as r:
@@ -150,8 +148,5 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
-    def runner():
-        download_database()
-        asyncio.run(main())
-
-    runner()
+    download_database()
+    asyncio.run(main())
