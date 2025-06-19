@@ -1,3 +1,4 @@
+telegram==0.0.0
 python-telegram-bot==20.7
 phonenumbers
 aiohttp
