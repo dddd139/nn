@@ -18,7 +18,7 @@ from telegram.ext import (
     filters,
 )
 
-# --- Конфиг ---
+# --- Переменные окружения ---
 TOKEN = os.getenv("TOKEN", "")
 IPINFO_TOKEN = os.getenv("IPINFO_TOKEN", "")
 HUNTER_API_KEY = os.getenv("HUNTER_API_KEY", "")
@@ -28,30 +28,26 @@ GDRIVE_FILE_ID = "1uSMpNJRQJqVziNmVANI7oBG8IyrZguCa"
 if not TOKEN:
     raise RuntimeError("❌ Укажите переменную окружения TOKEN")
 
-# --- Лог ---
+# --- Логирование ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Состояния ---
-user_states: dict[int, str] = {}
-
 # --- Загрузка базы с Google Drive ---
-async def download_db():
+async def download_database():
     if os.path.exists(DB_PATH):
-        logger.info("📦 data.db уже существует")
+        logger.info("📦 База уже загружена.")
         return
     url = f"https://drive.google.com/uc?export=download&id={GDRIVE_FILE_ID}"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    with open(DB_PATH, "wb") as f:
-                        f.write(await resp.read())
-                    logger.info("✅ data.db загружена с Google Drive")
-                else:
-                    logger.error(f"❌ Ошибка загрузки data.db: статус {resp.status}")
-    except Exception as e:
-        logger.error(f"❌ Не удалось загрузить data.db: {e}")
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"❌ Ошибка скачивания: {resp.status}")
+            with open(DB_PATH, "wb") as f:
+                f.write(await resp.read())
+    logger.info("✅ data.db загружена с Google Drive")
+
+# --- Состояния пользователей ---
+user_states: dict[int, str] = {}
 
 # --- Команды ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -62,7 +58,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/domain — информация о домене\n"
         "/email — проверка email через Hunter.io\n"
         "/telegram — проверить Telegram username\n"
-        "/searchdb — быстрый поиск по SQLite базе"
+        "/searchdb — быстрый поиск по базе SQLite"
     )
 
 async def cmd_generic(update: Update, context: ContextTypes.DEFAULT_TYPE, state: str, prompt: str):
@@ -88,7 +84,7 @@ async def cmd_searchdb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_states[update.effective_user.id] = "awaiting_dbsearch"
     await update.message.reply_text("🔎 Введите ключевое слово для поиска в базе данных:")
 
-# --- Поиск ---
+# --- FTS SQLite поиск ---
 def search_in_fts(keyword: str) -> list[str]:
     if not os.path.exists(DB_PATH):
         return ["❌ База данных не найдена"]
@@ -97,13 +93,12 @@ def search_in_fts(keyword: str) -> list[str]:
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        safe_keyword = f'"{keyword}"'
         query = """
         SELECT phone, email, name FROM users_fts
         WHERE users_fts MATCH ?
         LIMIT 10;
         """
-        cursor.execute(query, (safe_keyword,))
+        cursor.execute(query, (f'"{keyword}"',))
         rows = cursor.fetchall()
         for row in rows:
             results.append(" | ".join(str(x) for x in row))
@@ -157,16 +152,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         else:
             await update.message.reply_text("🤖 Используй команды: /start")
-
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
 
 # --- Запуск ---
 async def main():
-    await download_db()
-
     app = ApplicationBuilder().token(TOKEN).build()
-
     await app.bot.delete_webhook(drop_pending_updates=True)
 
     app.add_handler(CommandHandler("start", start))
@@ -181,17 +172,20 @@ async def main():
     logger.info("✅ OSINT-бот запущен")
     await app.run_polling()
 
+# --- Запуск с безопасным Event Loop ---
 if __name__ == "__main__":
+    import asyncio
+
     async def runner():
-        await main()               # запуск Telegram-бота
+        await download_database()
+        await main()
 
     try:
-        asyncio.run(runner())
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(runner())
     except RuntimeError as e:
-        if "event loop is running" in str(e):
-            loop = asyncio.get_event_loop()
-            loop.create_task(runner())
-            loop.run_forever()
+        if "already running" in str(e):
+            asyncio.create_task(runner())
         else:
             raise
 
