@@ -40,8 +40,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/ip — информация об IP\n"
         "/domain — информация о домене\n"
         "/email — проверка email через Hunter.io\n"
-        "/telegram — проверить Telegram username\n"
-        "/searchdb — быстрый поиск по SQLite базе"
+        "/telegram — проверить публичность Telegram\n"
+        "/searchcsv — поиск по CSV\n"
+        "/listcsv — список CSV-файлов"
     )
 
 async def cmd_generic(update: Update, context: ContextTypes.DEFAULT_TYPE, state: str, prompt: str):
@@ -77,11 +78,11 @@ def search_in_fts(keyword: str) -> list[str]:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         safe_keyword = f'"{keyword}"'  # Кавычки для FTS
-        query = \"""
+        query = """
         SELECT phone, email, name FROM users_fts
         WHERE users_fts MATCH ?
         LIMIT 10;
-        \"""
+        """
         cursor.execute(query, (safe_keyword,))
         rows = cursor.fetchall()
         for row in rows:
@@ -102,20 +103,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             num = phonenumbers.parse(text, None)
             country = geocoder.description_for_number(num, "en")
             operator = carrier.name_for_number(num, "en")
-            await update.message.reply_text(f"📞 Страна: {country}\\n📡 Оператор: {operator}")
+            await update.message.reply_text(f"📞 Страна: {country}\n📡 Оператор: {operator}")
 
         elif state == "awaiting_ip":
             url = f"https://ipinfo.io/{text}?token={IPINFO_TOKEN}"
             async with aiohttp.ClientSession() as sess:
                 async with sess.get(url) as resp:
                     data = await resp.json()
-            await update.message.reply_text("\\n".join(f"{k}: {v}" for k, v in data.items()))
+            await update.message.reply_text("\n".join(f"{k}: {v}" for k, v in data.items()))
 
         elif state == "awaiting_domain":
             ip = socket.gethostbyname(text)
             answers = dns.resolver.resolve(text, 'NS')
             ns = ", ".join(str(r.target) for r in answers)
-            await update.message.reply_text(f"🌐 {text} → IP: {ip}\\nNS: {ns}")
+            await update.message.reply_text(f"🌐 {text} → IP: {ip}\nNS: {ns}")
 
         elif state == "awaiting_email":
             url = f"https://api.hunter.io/v2/email-verifier?email={text}&api_key={HUNTER_API_KEY}"
@@ -123,7 +124,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 async with sess.get(url) as resp:
                     data = await resp.json()
             result = data.get("data", {})
-            await update.message.reply_text("\\n".join(f"{k}: {v}" for k, v in result.items()))
+            await update.message.reply_text("\n".join(f"{k}: {v}" for k, v in result.items()))
 
         elif state == "awaiting_telegram":
             user = text.lstrip("@")
@@ -158,5 +159,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
