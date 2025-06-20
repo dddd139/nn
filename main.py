@@ -23,6 +23,7 @@ TOKEN = os.getenv("TOKEN", "")
 IPINFO_TOKEN = os.getenv("IPINFO_TOKEN", "")
 HUNTER_API_KEY = os.getenv("HUNTER_API_KEY", "")
 DB_PATH = "data.db"
+USE_FTS = os.getenv("USE_FTS", "false").lower() == "true"  # Выбор режима поиска
 
 if not TOKEN:
     raise RuntimeError("❌ Укажите переменную окружения TOKEN")
@@ -45,8 +46,9 @@ def download_database():
 
 # --- Команды ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    mode = "FTS5" if USE_FTS else "индексированный SQL"
     await update.message.reply_text(
-        "👋 Привет! Я OSINT-бот. Вот что я умею:\n\n"
+        f"👋 Привет! Я OSINT-бот. Сейчас использую режим поиска: {mode}\n\n"
         "/phone — информация о номере телефона\n"
         "/ip — информация об IP\n"
         "/domain — информация о домене\n"
@@ -78,8 +80,8 @@ async def cmd_searchdb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_states[update.effective_user.id] = "awaiting_dbsearch"
     await update.message.reply_text("🔎 Введите запрос для поиска в базе:")
 
-# --- Быстрый SQL-поиск с использованием индексов (без FTS) ---
-async def fast_sqlite_search(query: str) -> list[str]:
+# --- Обычный индексированный SQL-поиск ---
+async def search_with_index(query: str) -> list[str]:
     if not os.path.exists(DB_PATH):
         return ["❌ База не найдена"]
     results = []
@@ -97,6 +99,27 @@ async def fast_sqlite_search(query: str) -> list[str]:
         conn.close()
     except Exception as e:
         results.append(f"❌ Ошибка при поиске: {e}")
+    return results or ["❌ Нет результатов"]
+
+# --- Поиск через FTS5 ---
+async def search_with_fts(query: str) -> list[str]:
+    if not os.path.exists(DB_PATH):
+        return ["❌ База не найдена"]
+    results = []
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT phone, email, name FROM users_fts
+            WHERE users_fts MATCH ?
+            LIMIT 10
+        """, (query,))
+        rows = cursor.fetchall()
+        for phone, email, name in rows:
+            results.append(f"📞 {phone} | 📧 {email} | 👤 {name}")
+        conn.close()
+    except Exception as e:
+        results.append(f"❌ Ошибка при FTS-поиске: {e}")
     return results or ["❌ Нет результатов"]
 
 # --- Обработка сообщений ---
@@ -125,7 +148,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif state == "awaiting_telegram":
             await update.message.reply_text(f"https://t.me/{text.lstrip('@')}")
         elif state == "awaiting_dbsearch":
-            for r in await fast_sqlite_search(text):
+            results = await search_with_fts(text) if USE_FTS else await search_with_index(text)
+            for r in results:
                 await update.message.reply_text(r)
         else:
             await update.message.reply_text("🤖 Используй команду /start")
@@ -148,8 +172,5 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
-    import nest_asyncio
-    nest_asyncio.apply()
     download_database()
-    asyncio.get_event_loop().create_task(main())
-    asyncio.get_event_loop().run_forever()
+    asyncio.run(main())
