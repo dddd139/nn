@@ -35,7 +35,44 @@ logger = logging.getLogger(__name__)
 # --- Состояния пользователей ---
 user_states: dict[int, str] = {}
 
-# --- Функция скачивания базы ---
+# --- Функции для скачивания больших файлов с Google Drive ---
+
+def _get_confirm_token(response):
+    for key, value in response.cookies.items():
+        if key.startswith('download_warning'):
+            return value
+    return None
+
+def _save_response_content(response, destination):
+    CHUNK_SIZE = 32768
+    with open(destination, "wb") as f:
+        for chunk in response.iter_content(CHUNK_SIZE):
+            if chunk:
+                f.write(chunk)
+
+def download_file_from_google_drive(file_id: str, destination: str):
+    URL = "https://docs.google.com/uc?export=download"
+    session = httpx.Client(follow_redirects=False)
+    response = session.get(URL, params={'id': file_id})
+    token = _get_confirm_token(response)
+    if token:
+        params = {'id': file_id, 'confirm': token}
+        response = session.get(URL, params=params, stream=True)
+    else:
+        response = session.get(URL, params={'id': file_id}, stream=True)
+    if response.status_code == 200:
+        _save_response_content(response, destination)
+        logger.info(f"✅ Загружен файл {destination}")
+    else:
+        logger.error(f"❌ Ошибка загрузки {destination}, статус {response.status_code}")
+
+def ensure_database(file_id, file_path):
+    if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+        logger.info(f"Файл {file_path} отсутствует или пуст. Загружаю с Google Drive...")
+        download_file_from_google_drive(file_id, file_path)
+    else:
+        logger.info(f"Файл {file_path} уже существует, пропускаю загрузку.")
+
 def download_databases():
     file_ids = [
         "1Tp7iudab37rOCo38clxZo6fLktwky95_",
@@ -48,22 +85,18 @@ def download_databases():
         "1lsYEZ5iBpsuop0BtsdwqmXbe8lmN5PR9",
     ]
     for idx, file_id in enumerate(file_ids, start=1):
+        path = f"data{idx}.db"
         try:
-            url = f"https://drive.google.com/uc?export=download&id={file_id}"
-            r = httpx.get(url, follow_redirects=True)
-            r.raise_for_status()
-            path = f"data{idx}.db"
-            with open(path, "wb") as f:
-                f.write(r.content)
-            logger.info(f"✅ Загружена {path}")
+            ensure_database(file_id, path)
         except Exception as e:
-            logger.error(f"❌ Ошибка загрузки data{idx}.db: {e}")
-    file_id = "1uSMpNJRQJqVziNmVANI7oBG8IyrZguCa"
-    url = f"https://drive.google.com/uc?export=download&id={file_id}"
-    r = httpx.get(url, follow_redirects=True)
-    with open("data.db", "wb") as f:
-        f.write(r.content)
-    logger.info("✅ data.db загружена с Google Drive")
+            logger.error(f"❌ Ошибка при загрузке {path}: {e}")
+
+    # Загрузка основной data.db
+    main_file_id = "1uSMpNJRQJqVziNmVANI7oBG8IyrZguCa"
+    try:
+        ensure_database(main_file_id, DB_PATH)
+    except Exception as e:
+        logger.error(f"❌ Ошибка при загрузке {DB_PATH}: {e}")
 
 # --- Команды ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -199,6 +232,5 @@ if __name__ == "__main__":
     import nest_asyncio
     nest_asyncio.apply()
 
-    download_databases()
+    download_databases()  # загрузка баз перед запуском
     asyncio.get_event_loop().run_until_complete(main())
-
