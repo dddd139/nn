@@ -8,6 +8,11 @@ from googleapiclient.http import MediaIoBaseDownload
 import io
 import asyncio
 import tempfile
+import nest_asyncio
+import base64
+
+# Применяем nest_asyncio для поддержки вложенных циклов событий
+nest_asyncio.apply()
 
 # Конфигурация
 TELEGRAM_TOKEN = '7272612416:AAHgZU0SgaQwpn08mJeqk0lHgviCUOcxE5c'
@@ -36,10 +41,18 @@ TEMP_DIR = tempfile.gettempdir()  # Временная папка для хра�
 
 # Инициализация Google Drive API
 def init_drive_service():
-    creds = Credentials.from_authorized_user_file(GOOGLE_CREDENTIALS_FILE, [
-        'https://www.googleapis.com/auth/drive.readonly'
-    ])
-    return build('drive', 'v3', credentials=creds)
+    try:
+        if os.getenv('GOOGLE_CREDENTIALS'):
+            creds_data = base64.b64decode(os.getenv('GOOGLE_CREDENTIALS')).decode('utf-8')
+            with open(os.path.join(TEMP_DIR, 'credentials.json'), 'w') as f:
+                f.write(creds_data)
+        creds = Credentials.from_authorized_user_file(os.path.join(TEMP_DIR, 'credentials.json'), [
+            'https://www.googleapis.com/auth/drive.readonly'
+        ])
+        return build('drive', 'v3', credentials=creds)
+    except Exception as e:
+        print(f"Ошибка инициализации Google Drive API: {e}")
+        raise
 
 # Функция загрузки файла с Google Drive
 async def download_file(drive_service, file_id, file_name, context):
@@ -73,7 +86,6 @@ async def search_in_db(file_path, query, chat_id, bot):
     try:
         conn = sqlite3.connect(file_path)
         cursor = conn.cursor()
-        # Выполняем полнотекстовый поиск в таблице user_fts
         cursor.execute("SELECT * FROM user_fts WHERE user_fts MATCH ?", (query,))
         results = cursor.fetchall()
         conn.close()
@@ -90,10 +102,25 @@ async def search_in_db(file_path, query, chat_id, bot):
     except Exception as e:
         await bot.send_message(chat_id=chat_id, text=f"Ошибка при поиске в {os.path.basename(file_path)}: {str(e)}")
 
+# Фproofункция очистки временных файлов
+async def cleanup(update, context):
+    chat_id = update.message.chat_id
+    try:
+        for file_name in FILE_NAMES:
+            file_path = os.path.join(TEMP_DIR, file_name)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                await context.bot.send_message(chat_id=chat_id, text=f"Файл {file_name} удалён")
+            else:
+                await context.bot.send_message(chat_id=chat_id, text=f"Файл {file_name} не найден")
+        await context.bot.send_message(chat_id=chat_id, text="Очистка завершена")
+    except Exception as e:
+        await context.bot.send_message(chat_id=chat_id, text=f"Ошибка при очистке: {str(e)}")
+
 # Команда /start
 async def start(update, context):
     await update.message.reply_text(
-        'Привет! Используйте /download для загрузки баз данных (около 20 ГБ) на сервер или /search <запрос> для поиска по таблице user_fts.'
+        'Привет! Используйте /download для загрузки баз данных (около 20 ГБ), /search <запрос> для поиска по таблице user_fts, или /cleanup для удаления загруженных баз.'
     )
 
 # Команда /download
@@ -148,8 +175,12 @@ async def main():
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('download', download))
     application.add_handler(CommandHandler('search', search))
+    application.add_handler(CommandHandler('cleanup', cleanup))
     
+    # Запускаем polling в текущем цикле событий
     await application.run_polling()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    # Используем текущий цикл событий вместо asyncio.run()
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
