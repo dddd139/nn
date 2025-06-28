@@ -3,3 +3,6 @@ phonenumbers
 aiohttp
 dnspython
 nest_asyncio
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
