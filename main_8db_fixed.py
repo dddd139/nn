@@ -10,13 +10,14 @@ import asyncio
 import tempfile
 import nest_asyncio
 import base64
+from aiohttp import web
 
 # Применяем nest_asyncio для поддержки вложенных циклов событий
 nest_asyncio.apply()
 
 # Конфигурация
 TELEGRAM_TOKEN = '7272612416:AAHgZU0SgaQwpn08mJeqk0lHgviCUOcxE5c'
-GOOGLE_CREDENTIALS_FILE = 'credentials.json'  # Файл учетных данных Google API
+GOOGLE_CREDENTIALS_FILE = 'credentials.json'
 FILE_IDS = [
     '1fnLM68dxLI5vvjFXudoUVfO8DTWVjbuT',
     '1uPdPWWXtCxObqqbjwLThU6MaWd-6n7W_',
@@ -37,7 +38,21 @@ FILE_NAMES = [
     'telegram_bd.db',
     'burgerkingrus.ru_08.2024_(5.627.676)_orders.csv.db'
 ]
-TEMP_DIR = tempfile.gettempdir()  # Временная папка для хранения баз
+TEMP_DIR = tempfile.gettempdir()
+
+# Минимальный HTTP-сервер для Render
+async def handle(request):
+    return web.Response(text="Telegram bot is running")
+
+async def start_http_server():
+    app = web.Application()
+    app.add_routes([web.get('/', handle)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv('PORT', 10000))  # Render задаёт PORT, по умолчанию 10000
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"HTTP сервер запущен на порту {port}")
 
 # Инициализация Google Drive API
 def init_drive_service():
@@ -46,6 +61,10 @@ def init_drive_service():
             creds_data = base64.b64decode(os.getenv('GOOGLE_CREDENTIALS')).decode('utf-8')
             with open(os.path.join(TEMP_DIR, 'credentials.json'), 'w') as f:
                 f.write(creds_data)
+        if os.getenv('GOOGLE_TOKEN'):
+            token_data = base64.b64decode(os.getenv('GOOGLE_TOKEN')).decode('utf-8')
+            with open(os.path.join(TEMP_DIR, 'token.json'), 'w') as f:
+                f.write(token_data)
         creds = Credentials.from_authorized_user_file(os.path.join(TEMP_DIR, 'credentials.json'), [
             'https://www.googleapis.com/auth/drive.readonly'
         ])
@@ -102,7 +121,7 @@ async def search_in_db(file_path, query, chat_id, bot):
     except Exception as e:
         await bot.send_message(chat_id=chat_id, text=f"Ошибка при поиске в {os.path.basename(file_path)}: {str(e)}")
 
-# Фproofункция очистки временных файлов
+# Функция очистки временных файлов
 async def cleanup(update, context):
     chat_id = update.message.chat_id
     try:
@@ -177,10 +196,12 @@ async def main():
     application.add_handler(CommandHandler('search', search))
     application.add_handler(CommandHandler('cleanup', cleanup))
     
-    # Запускаем polling в текущем цикле событий
-    await application.run_polling()
+    # Запускаем HTTP-сервер и Telegram-бот параллельно
+    await asyncio.gather(
+        start_http_server(),
+        application.run_polling()
+    )
 
 if __name__ == '__main__':
-    # Используем текущий цикл событий вместо asyncio.run()
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
